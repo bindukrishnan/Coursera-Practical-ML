@@ -1,0 +1,101 @@
+---
+title: "Coursera Practical Machine Learning Project"
+author: "Bindu"
+date: "23/08/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(caret)
+library(tidyverse)
+library(randomForest)
+library(e1071)
+library(doParallel)
+```
+
+## Project Explanation
+
+This data for this project relates to the weight lifting exercise dataset to test to see how well a number of accelerometers can be used to distinguish the type of exercise
+done.
+The objective of this is to be able to tell when an exercise is done with good form, rather than simply counting the number of movements. 
+
+[The data can be found here] (http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har)
+
+
+
+## Initial Steps & Analysis
+
+The main challenge with this project is that the dataset includes 160 variables, and many of them are a bit unusual in the number of factors and points of information they have. So in order to properly analyze this, we need to figure
+out how to clean this up.
+
+The first thing to know is that the data is gleaned from a set of monitors that track acceleration on the parts they are attached to.
+
+Looking at the data, we can divide it into roughly 3 categories: the actual accelerometer data, the derived statistics from the data, and the meta information that goes along with it.
+
+The metainfo includes the timestamp, window, etc, and is useless for analysis and can be removed.
+
+Secondly, the derived features contain things like: kurtosis, max, min, avg, variance, etc. These are things we can derive ourselves from the raw data, and they also create a problem for the algorithm because they have unusual values. 
+For example, the kurtosis_roll_belt has 19000 missing entries and 400 entries with different values, which creates problems for the algorithm.
+
+
+```{r dataload}
+dat = read.csv("pml-training.csv")
+ver = read.csv("pml-testing.csv")
+
+```
+
+## Data Cleaning/Preparation Method
+
+In order to handle the above problems, we get rid of all of the meta data, as well as get rid of the various derived values. None of them are very difficult to calculate ourselves and they provide unnecessary confounding.
+Since all the derived values have similar names we can easily eliminate them with a regular expression search.
+
+```{r dataclean}
+set.seed(3456)
+dat$classe <- as.factor(dat$classe)
+dat_clean <- dat[,-(1:7)]
+clean_cols <- colSums(is.na(dat_clean)) == 0
+dat_clean <- dat_clean[,clean_cols]
+
+subvar <- grep("^(max|min|amp|var|stddev|kurtosis|skewness)",names(dat_clean))
+dat_clean <- dat_clean[,-subvar]
+```
+
+After that, we preprocess with PCA, and do a cross-validation with a 6:4 ratio.
+
+We will be using random forest through the caret module to create our model,
+using 10-fold cross validation.
+
+```{r model}
+datidx <- createDataPartition(y=dat_clean$classe, p = .60, list = FALSE)
+trn_dat <- dat_clean[datidx,]
+tst_dat <- dat_clean[-datidx,]
+fitControl <- trainControl(method = "cv",
+                           number = 10,
+                           allowParallel = TRUE,
+                           savePredictions = TRUE)
+
+cluster <- makeCluster(detectCores() - 1) 
+registerDoParallel(cluster)
+model <- train(classe ~ ., data = trn_dat, method="rf", preProcess="pca",
+               trControl = fitControl, allowParallel=TRUE)
+stopCluster(cluster)
+
+```
+
+## Results
+
+As we can see from the confusion matrix below, the output of sample accuracy is quite high.
+We have an accuracy of 97.03 and a kappa of 96.24.
+
+```{r results}
+tst_dat$class<-as.factor(tst_dat$classe)
+pred <- predict(model, tst_dat)
+confusionMatrix(pred,as.factor(tst_dat$classe))
+```
+
+
+
+
+
+
